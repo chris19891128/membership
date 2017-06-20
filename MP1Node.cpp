@@ -129,6 +129,10 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
         log->LOG(&memberNode->addr, "Starting up group...");
 #endif
         memberNode->inGroup = true;
+
+        // Important here
+        // Introducer in the membership in the beginning, the others start it when receive RES
+        log->logNodeAdd(joinaddr, joinaddr);
     }
     else {
         size_t msgsize = sizeof(MessageHdr) + sizeof(joinaddr->addr) + sizeof(long) + 1;
@@ -218,6 +222,53 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
 	/*
 	 * Your code goes here
 	 */
+     // cout << "size of MessageHdr " << sizeof(MessageHdr) << endl;
+     // cout << "size of long " << sizeof(long) << endl;
+     // for(int i=0;i<size;i++) {
+     //    cout << (int)(*(data + i)) << " ";
+     // }
+     // cout << endl;
+    //    size of MessageHdr 4
+    // size of long 8
+    // 0 0 0 0 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
+
+    MessageHdr *msg;
+    msg = (MessageHdr *)data;
+    int addrSize = sizeof(memberNode->addr.addr);
+
+    char *p = (char *) (msg + 1);
+    Address remoteAddr;
+    memcpy(&(remoteAddr.addr), p, addrSize);
+    
+    if (msg->msgType == JOINREQ) {
+        // process request message
+
+        // How to reply to remoteAddr, what is in the payload
+        size_t replySize = sizeof(MessageHdr) + addrSize + sizeof(long);
+        char *reply = (char *)malloc(replySize);
+        ((MessageHdr *) reply) -> msgType = JOINREP;
+        memcpy(reply + sizeof(MessageHdr), &memberNode->addr.addr, addrSize);
+        memcpy(reply + sizeof(MessageHdr) + addrSize, &memberNode->heartbeat, sizeof(long));
+
+        emulNet->ENsend(&memberNode->addr, &remoteAddr, reply, replySize);
+        log->logNodeAdd(&memberNode->addr, &remoteAddr);
+
+    } else if (msg->msgType == JOINREP) {
+        cout << "Received response" << endl;
+
+        // Add myself into membership list
+        log->logNodeAdd(&memberNode->addr, &memberNode->addr);
+
+        // Add introducer into membership list
+        log->logNodeAdd(&memberNode->addr, &remoteAddr);
+
+        // Introducer may send me more members ??
+    } else if (msg->msgType == HEARTBEAT) {
+        // process heartbeat
+    } else if (msg->msgType == MEMGOSSIP) {
+        // process gossip
+    }
+
 }
 
 /**

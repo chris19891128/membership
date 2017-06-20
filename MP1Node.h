@@ -31,7 +31,9 @@
 enum MsgTypes{
     JOINREQ,
     JOINREP,
-    DUMMYLASTMSGTYPE
+    DUMMYLASTMSGTYPE,
+    HEARTBEAT,
+    MEMGOSSIP
 };
 
 /**
