@@ -77,6 +77,12 @@ public:
 	Address getJoinAddress();
 	void initMemberListTable(Member *memberNode);
 	void printAddress(Address *addr);
+	void updateMemberList(Address *remote, long hb);
+	void broadcastHeartBeat();
+	void printSendMsg(Address *remote, char *msg, int msgsize);
+	void cleanupMemberList();
+	char* makeMemberListMsg(enum MsgTypes type, size_t *size);
+	Address idPort2Address(int id, short port);
 	virtual ~MP1Node();
 };
 

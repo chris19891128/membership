@@ -130,9 +130,8 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
 #endif
         memberNode->inGroup = true;
 
-        // Important here
-        // Introducer in the membership in the beginning, the others start it when receive RES
-        log->logNodeAdd(joinaddr, joinaddr);
+        updateMemberList(&memberNode->addr, memberNode->heartbeat);
+
     }
     else {
         size_t msgsize = sizeof(MessageHdr) + sizeof(joinaddr->addr) + sizeof(long) + 1;
@@ -180,6 +179,16 @@ void MP1Node::nodeLoop() {
     	return;
     }
 
+    // Debug
+    cout << "Dumping member list for " << memberNode->addr.getAddress() << endl;
+    vector<MemberListEntry>::iterator it = memberNode->memberList.begin();
+    for (; it != memberNode->memberList.end(); ++it) {
+        cout << it->id << " " << it->port << " " << it->heartbeat << " " << it->timestamp << endl;
+    }
+    cout << "Done" << endl;
+
+    memberNode->heartbeat++;
+
     // Check my messages
     checkMessages();
 
@@ -187,6 +196,8 @@ void MP1Node::nodeLoop() {
     if( !memberNode->inGroup ) {
     	return;
     }
+
+    updateMemberList(&memberNode->addr, memberNode->heartbeat);
 
     // ...then jump in and share your responsibilites!
     nodeLoopOps();
@@ -235,32 +246,58 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
     MessageHdr *msg;
     msg = (MessageHdr *)data;
     int addrSize = sizeof(memberNode->addr.addr);
-
-    char *p = (char *) (msg + 1);
-    Address remoteAddr;
-    memcpy(&(remoteAddr.addr), p, addrSize);
     
     if (msg->msgType == JOINREQ) {
         // process request message
+        char *p = (char *) (msg + 1);
+        Address remoteAddr;
+        memcpy(&(remoteAddr.addr), p, addrSize);
+        
+        long hb = *(long *) (p + addrSize);
+
+        updateMemberList(&remoteAddr, hb);
 
         // How to reply to remoteAddr, what is in the payload
-        size_t replySize = sizeof(MessageHdr) + addrSize + sizeof(long);
-        char *reply = (char *)malloc(replySize);
-        ((MessageHdr *) reply) -> msgType = JOINREP;
-        memcpy(reply + sizeof(MessageHdr), &memberNode->addr.addr, addrSize);
-        memcpy(reply + sizeof(MessageHdr) + addrSize, &memberNode->heartbeat, sizeof(long));
+        size_t replySize;
+        char *reply = makeMemberListMsg(JOINREP, &replySize);
+
+        cout << memberNode->addr.getAddress() << " Sending JOINREP to " << remoteAddr.getAddress() << endl;
+        
+        for(int i=0;i<replySize;i++) {
+            cout << (int)*(reply+i) << " ";
+        }
+        cout << "Message size is " << replySize << endl;
 
         emulNet->ENsend(&memberNode->addr, &remoteAddr, reply, replySize);
-        log->logNodeAdd(&memberNode->addr, &remoteAddr);
 
     } else if (msg->msgType == JOINREP) {
-        cout << "Received response" << endl;
+        cout << memberNode->addr.getAddress() << " Received JOINREP" << endl;
+        // cout << "Size of constants" << sizeof(MessageHdr) << " " << sizeof(int) << endl;
+
+        // for(int i=0;i<size;i++) {
+        //     cout << (int)*(data+i) << " ";
+        // }
+        cout << endl;
+
+        memberNode->inGroup = true;
 
         // Add myself into membership list
-        log->logNodeAdd(&memberNode->addr, &memberNode->addr);
+        updateMemberList(&memberNode->addr, memberNode->heartbeat);
 
         // Add introducer into membership list
-        log->logNodeAdd(&memberNode->addr, &remoteAddr);
+        // To be improved
+        int num = * (int *) (data + sizeof(MessageHdr));
+        char *p = data + sizeof(MessageHdr) + sizeof(int);
+        // cout << "JOIN REP Has " << num << " entries" << endl;
+        for(int i = 0; i < num; i++) {
+            Address remoteAddr;
+            memcpy(&(remoteAddr.addr), p, addrSize);
+            long hb = *(long *) (p + addrSize);
+
+            updateMemberList(&remoteAddr, hb);
+
+            p = p + addrSize + sizeof(long);
+        }
 
         // Introducer may send me more members ??
     } else if (msg->msgType == HEARTBEAT) {
@@ -283,10 +320,87 @@ void MP1Node::nodeLoopOps() {
 	/*
 	 * Your code goes here
 	 */
-
+    // cleanupMemberList();
+    // broadcastHeartBeat();
     return;
 }
 
+char* MP1Node::makeMemberListMsg(enum MsgTypes type, size_t *size) {
+    int memlen = memberNode->memberList.size();
+    int addrSize = sizeof(memberNode->addr.addr);
+
+    *size = sizeof(MessageHdr) + sizeof(int) + (addrSize + sizeof(long)) * memlen ;
+    char *msg = (char *)malloc(*size);
+    ((MessageHdr *) msg) -> msgType = type;
+    *(int *)(msg + sizeof(MessageHdr)) = memlen;
+
+    char *p = msg + sizeof(MessageHdr) + sizeof(int);
+
+    vector<MemberListEntry>::iterator it = memberNode->memberList.begin();
+    for (; it != memberNode->memberList.end(); ++it) {
+        Address remoteAddr = idPort2Address(it->id, it->port);
+        memcpy(p, &remoteAddr.addr, addrSize);
+        memcpy(p + addrSize, &it->heartbeat, sizeof(long));
+        p = p + addrSize + sizeof(long);
+    }
+
+    return msg;
+}
+
+void MP1Node::broadcastHeartBeat() {
+    vector<MemberListEntry>::iterator it = memberNode->memberList.begin();
+    int addrSize = sizeof(memberNode->addr.addr);
+
+    for (; it != memberNode->memberList.end(); ++it) {
+        if (it->heartbeat >= 0) {
+            Address remoteAddr = idPort2Address(it->id, it->port);
+
+            size_t hbSize = sizeof(MessageHdr) + addrSize + sizeof(long);
+            char *hb = (char *)malloc(hbSize);
+            ((MessageHdr *) hb) -> msgType = HEARTBEAT;
+            memcpy(hb + sizeof(MessageHdr), &memberNode->addr.addr, addrSize);
+            memcpy(hb + sizeof(MessageHdr) + addrSize, &memberNode->heartbeat, sizeof(long));
+            emulNet->ENsend(&memberNode->addr, &remoteAddr, hb, hbSize);
+        }
+    }
+}
+
+void MP1Node::updateMemberList(Address *remote, long hb) {
+    vector<MemberListEntry>::iterator it = memberNode->memberList.begin();
+    int id = *(int *)(&remote->addr);
+    short port = *(short *)(&remote->addr[4]);
+    bool isNew = true;
+    for (; it != memberNode->memberList.end(); ++it) {
+        if(it->id == id && it->port == port) {
+            isNew = false;
+            if(it -> heartbeat >= 0 && hb > it->heartbeat) {
+                it->heartbeat = hb;
+                it->timestamp = par->getcurrtime();
+            }
+        }
+    }
+
+    if (isNew) {
+        memberNode->memberList.push_back(MemberListEntry(id, port, hb, par->getcurrtime()));
+        log->logNodeAdd(&memberNode->addr, remote);
+    }
+}
+
+void MP1Node::cleanupMemberList() {
+    int currtime = par->getcurrtime();
+    vector<MemberListEntry>::iterator it = memberNode->memberList.begin();
+
+    while(it != memberNode->memberList.end()){
+        if (it->heartbeat == -1 && it->timestamp <= currtime - TREMOVE) {
+            it = memberNode->memberList.erase(it);
+        } else if(it->heartbeat >= 0 && it->timestamp <= currtime - TFAIL) {
+            it->heartbeat = -1;
+            ++it;
+        } else {
+            ++it;
+        }
+    }
+}
 /**
  * FUNCTION NAME: isNullAddress
  *
@@ -329,4 +443,20 @@ void MP1Node::printAddress(Address *addr)
 {
     printf("%d.%d.%d.%d:%d \n",  addr->addr[0],addr->addr[1],addr->addr[2],
                                                        addr->addr[3], *(short*)&addr->addr[4]) ;    
+}
+
+void MP1Node::printSendMsg(Address *remote, char *msg, int msgsize) {
+    cout << memberNode->addr.getAddress() << "Sending to ";
+    printAddress(remote);
+    for(int i = 0; i < msgsize; i ++){
+        cout << *(msg + i) << " ";
+    }
+    cout << endl;
+}
+
+Address MP1Node::idPort2Address(int id, short port) {
+    Address remoteAddr;
+    *(int *)remoteAddr.addr = id;
+    *(short *)(&remoteAddr.addr[4]) = port;
+    return remoteAddr;
 }
