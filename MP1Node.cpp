@@ -302,6 +302,12 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
         // Introducer may send me more members ??
     } else if (msg->msgType == HEARTBEAT) {
         // process heartbeat
+        Address remoteAddr;
+        memcpy(&(remoteAddr.addr), data  + sizeof(MessageHdr), addrSize);
+        long hb = *(long *) (data  + sizeof(MessageHdr) + addrSize);
+
+        updateMemberList(&remoteAddr, hb);
+
     } else if (msg->msgType == MEMGOSSIP) {
         // process gossip
     }
@@ -321,7 +327,8 @@ void MP1Node::nodeLoopOps() {
 	 * Your code goes here
 	 */
     // cleanupMemberList();
-    // broadcastHeartBeat();
+    broadcastHeartBeat();
+    // gossipMemberList();
     return;
 }
 
@@ -360,6 +367,8 @@ void MP1Node::broadcastHeartBeat() {
             ((MessageHdr *) hb) -> msgType = HEARTBEAT;
             memcpy(hb + sizeof(MessageHdr), &memberNode->addr.addr, addrSize);
             memcpy(hb + sizeof(MessageHdr) + addrSize, &memberNode->heartbeat, sizeof(long));
+            
+            cout << memberNode->addr.getAddress() << " Sending HEARTBEAT to " << remoteAddr.getAddress() << " with hb " << hb << endl;            
             emulNet->ENsend(&memberNode->addr, &remoteAddr, hb, hbSize);
         }
     }
