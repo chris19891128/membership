@@ -134,13 +134,14 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
 
     }
     else {
-        size_t msgsize = sizeof(MessageHdr) + sizeof(joinaddr->addr) + sizeof(long) + 1;
+        size_t msgsize = sizeof(MessageHdr) + sizeof(joinaddr->addr) + sizeof(long);
         msg = (MessageHdr *) malloc(msgsize * sizeof(char));
 
         // create JOINREQ message: format of data is {struct Address myaddr}
+        // Old code is buggy. why additional byte between address and hb ???
         msg->msgType = JOINREQ;
         memcpy((char *)(msg+1), &memberNode->addr.addr, sizeof(memberNode->addr.addr));
-        memcpy((char *)(msg+1) + 1 + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(long));
+        memcpy((char *)(msg+1) + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(long));
 
 #ifdef DEBUGLOG
         sprintf(s, "Trying to join...");
@@ -180,6 +181,7 @@ void MP1Node::nodeLoop() {
     }
 
     // Debug
+    cout << "\n========\n" << "Time now is " << par->getcurrtime() << " on " << memberNode->addr.getAddress() << endl;
     cout << "Dumping member list for " << memberNode->addr.getAddress() << endl;
     vector<MemberListEntry>::iterator it = memberNode->memberList.begin();
     for (; it != memberNode->memberList.end(); ++it) {
@@ -254,6 +256,8 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
         memcpy(&(remoteAddr.addr), p, addrSize);
         
         long hb = *(long *) (p + addrSize);
+
+        cout << memberNode->addr.getAddress() << " Received JOINREQ from " << remoteAddr.getAddress() << endl;
 
         updateMemberList(&remoteAddr, hb);
 
