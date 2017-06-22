@@ -83,6 +83,8 @@ public:
 	void cleanupMemberList();
 	char* makeMemberListMsg(enum MsgTypes type, size_t *size);
 	Address idPort2Address(int id, short port);
+	void updateMemberListUsingMsg(char *msg, int size);
+	void gossipMemberList();
 	virtual ~MP1Node();
 };
 
